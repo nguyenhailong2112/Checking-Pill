@@ -1,0 +1,40 @@
+{
+  "detector": {
+    "backend": "heuristic",
+    "confidence_threshold": 0.25,
+    "nms_iou_threshold": 0.45,
+    "heuristic": {
+      "min_area_ratio": 0.0008,
+      "max_area_ratio": 0.35,
+      "foreground_threshold": 32,
+      "merge_distance_px": 0
+    },
+    "yolo": {
+      "weights_path": null,
+      "image_size": 832,
+      "device": null
+    }
+  },
+  "cropper": {
+    "padding_ratio": 0.12,
+    "output_size": 224,
+    "save_crops": true
+  },
+  "identifier": {
+    "backend": "reference_gallery",
+    "reference_root": null,
+    "reference_manifest": null,
+    "reference_image_root": null,
+    "reference_only": true,
+    "unknown_threshold": 0.82,
+    "top_k": 5
+  },
+  "quality": {
+    "min_foreground_ratio": 0.08,
+    "max_foreground_ratio": 0.92,
+    "min_mask_solidity": 0.72,
+    "max_border_touch_ratio": 0.18,
+    "max_dark_spot_ratio": 0.16,
+    "review_score_threshold": 0.62
+  }
+}
