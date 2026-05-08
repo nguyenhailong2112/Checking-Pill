@@ -1,22 +1,25 @@
-# EdgeVision Architecture
+# Kiến Trúc Hệ Thống EdgeVision
 
-## System Contract
+Tài liệu này giải thích cách chương trình EdgeVision được thiết kế, vì sao phải
+tách thành nhiều module, và mỗi module chịu trách nhiệm gì.
 
-The stage-1 system receives an image and returns:
+## 1. Mục Tiêu Kiến Trúc
 
-- detected pill bounding boxes,
-- total pill count,
-- count by predicted type,
-- per-pill identity prediction,
-- per-pill OK/NG/REVIEW decision,
-- annotated image,
-- machine-readable JSON report.
+Mục tiêu hiện tại chưa phải là đưa ngay lên Edge Device. Mục tiêu đúng ở giai
+đoạn này là:
 
-The core design is modular because detection, identity, and quality inspection
-have different data sources, metrics, and failure modes.
+1. Chương trình local chạy được.
+2. Có thể gắn model detector `best.pt`.
+3. Có thể test trên ảnh thật.
+4. Có thể xuất kết quả rõ ràng để kiểm tra đúng/sai.
+5. Có thể mở rộng sang object mới do user label.
+6. Có cấu trúc đủ sạch để sau này đóng gói lên Edge AI Device.
+
+## 2. Luồng Tổng Thể
 
 ```text
-ImagePrecheck
+ảnh đầu vào hoặc frame camera
+ -> ImagePrecheck
  -> Detector
  -> PostProcessor
  -> CropNormalizer
@@ -26,69 +29,224 @@ ImagePrecheck
  -> Reporter
 ```
 
-## Data Mapping
+Diễn giải:
 
-The ePillID benchmark folder remains a source-data repository:
+- `ImagePrecheck`: kiểm tra ảnh có dùng được không.
+- `Detector`: tìm object trong ảnh.
+- `PostProcessor`: lọc bbox, confidence, NMS.
+- `CropNormalizer`: crop object và resize về kích thước chuẩn.
+- `Identifier`: nhận diện loại thuốc nếu object là pill.
+- `QualityInspector`: kiểm tra OK/NG nếu object cần inspection.
+- `DecisionFusion`: hợp nhất kết quả từng object thành trạng thái ảnh.
+- `Reporter`: lưu JSON, CSV, ảnh annotate, crop.
 
-- `archive/`: YOLO-format one-class pill detection dataset.
-- `ePillID_data/`: crop-level reference/consumer pill identity dataset.
-- `MEDISEG/`: additional pill images and medication metadata.
+## 3. Vì Sao Không Làm Một Model Duy Nhất?
 
-EdgeVision should not mutate those source folders. Training scripts should read
-from them, produce derived datasets under this repo's ignored `artifacts/` or
-`runs/`, and record the source path in metadata.
+Không nên gom detection, classification, OK/NG vào một model duy nhất vì:
 
-## Module Boundaries
+- Detection cần bbox label.
+- Nhận diện loại thuốc cần crop/reference/embedding.
+- OK/NG cần defect label thật.
+- Object mới tại site có thể chỉ cần thêm class detector.
+- Loại thuốc mới có thể chỉ cần thêm reference ảnh.
+- Metric đánh giá của từng bài toán khác nhau.
 
-### Detector
+Vì vậy kiến trúc đúng là nhiều module nhỏ, contract rõ ràng, có thể thay thế
+từng module khi model tốt hơn.
 
-Input: RGB image.
+## 4. Runtime Contract
 
-Output: list of `Detection` objects with `bbox`, `confidence`, and `label`.
+Với một ảnh RGB đầu vào, chương trình trả ra:
 
-The detector should only answer "where are pill instances?" It should not decide
-the medication type. This keeps counting robust and allows the detector to be
-trained with a single class.
+- kích thước ảnh,
+- tổng số object detect được,
+- count theo nhãn detector,
+- count theo type/identity,
+- bbox từng object,
+- confidence detector,
+- nhãn detector,
+- type nhận diện,
+- confidence nhận diện,
+- trạng thái quality `OK`, `NG`, hoặc `REVIEW`,
+- flags giải thích lỗi,
+- crop path,
+- thông tin precheck,
+- thời gian chạy từng stage,
+- ảnh annotate,
+- JSON report.
 
-### Identifier
+Ví dụ field chính trong `report.json`:
 
-Input: normalized crop.
+```json
+{
+  "total_count": 3,
+  "count_by_detection_label": {
+    "pill": 3
+  },
+  "count_by_type": {
+    "RoundWhiteTablet": 2,
+    "RedWhiteCapsule": 1
+  },
+  "image_status": "NG"
+}
+```
 
-Output: `IdentificationResult` with top-k candidates and confidence.
+## 5. Detector
 
-Two strategies are supported by design:
+Detector trả lời câu hỏi:
 
-- closed-set classifier for fixed production lines,
-- reference-gallery retrieval for low-shot and expandable medication sets.
+```text
+Object nằm ở đâu?
+Object thuộc class detector nào?
+```
 
-The initial gallery loader supports two source contracts:
+Detector không nên quyết định loại thuốc chi tiết. Ví dụ detector có thể trả:
 
-- folder gallery: `reference_root/<label>/*.jpg`,
-- CSV manifest: columns `label`, `image_path`, optional `is_ref`.
+```text
+pill
+bottle
+blister
+thermometer
+syringe
+```
 
-### Quality Inspector
+Sau đó nếu object là `pill`, module identifier mới nhận diện sâu hơn:
 
-Input: normalized crop and optional identity result.
+```text
+RoundWhiteTablet
+RedWhiteCapsule
+BlueCaplet
+...
+```
 
-Output: `QualityResult` with status `OK`, `NG`, or `REVIEW`.
+Backend hiện có:
 
-The initial implementation is rule based. It must be replaced or augmented by
-supervised/anomaly models when real OK/NG data is available.
+- `heuristic`: dùng để demo/smoke test.
+- `yolo`: dùng trọng số YOLO thật.
+- `auto`: nếu có weights thì dùng YOLO, nếu không có thì fallback heuristic.
 
-### Decision Fusion
+## 6. Identifier
 
-The fused status should avoid forced binary decisions when evidence is weak:
+Identifier trả lời câu hỏi:
 
-- `OK`: confident identity and no strong quality anomaly.
-- `NG`: strong defect evidence.
-- `REVIEW`: low detector confidence, unknown identity, poor image quality, or
-  weak quality score.
+```text
+Viên thuốc này là loại gì?
+```
 
-## Edge AI Preparation
+Hiện tại identifier dùng reference gallery:
 
-Each model-facing component is isolated so stage 2 can export or replace it:
+```text
+reference_gallery/
+  RoundWhiteTablet/
+    ref_001.jpg
+    ref_002.jpg
+  RedWhiteCapsule/
+    ref_001.jpg
+```
 
-- detector: YOLO to ONNX/TensorRT/OpenVINO,
-- identifier: embedding model to ONNX plus gallery index,
-- inspector: rule engine or anomaly model,
-- reporter: unchanged business logic.
+Chương trình chỉ chạy identifier cho detector label nằm trong:
+
+```json
+"identifier": {
+  "apply_to_detection_labels": ["pill"]
+}
+```
+
+Nghĩa là:
+
+- `pill` -> chạy nhận diện loại thuốc,
+- `bottle` -> giữ label `bottle`,
+- `thermometer` -> giữ label `thermometer`,
+- `syringe` -> giữ label `syringe`.
+
+Đây là điểm quan trọng để chương trình xử lý object mới đúng hướng, không ép
+mọi object qua pill classifier.
+
+## 7. Quality Inspector
+
+Quality inspector trả lời câu hỏi:
+
+```text
+Object này OK, NG hay cần REVIEW?
+```
+
+Hiện tại quality inspector là rule-based baseline, đo:
+
+- foreground ratio,
+- mask solidity,
+- border touch ratio,
+- dark spot ratio,
+- identity unknown.
+
+Chương trình chỉ chạy quality cho detector label nằm trong:
+
+```json
+"quality": {
+  "apply_to_detection_labels": ["pill"]
+}
+```
+
+Nếu sau này bạn muốn kiểm tra OK/NG cho object khác, ví dụ `blister`, có thể cấu
+hình:
+
+```json
+"apply_to_detection_labels": ["pill", "blister"]
+```
+
+## 8. Decision Fusion
+
+Logic hợp nhất trạng thái ảnh:
+
+1. Ảnh không đạt precheck -> `REVIEW`.
+2. Có bất kỳ item nào `NG` -> ảnh là `NG`.
+3. Có bất kỳ item nào `REVIEW` -> ảnh là `REVIEW`.
+4. Còn lại -> ảnh là `OK`.
+
+Nguyên tắc là không được ép kết quả mơ hồ thành OK.
+
+## 9. Site Project
+
+Site project là gói cấu hình/dữ liệu riêng cho một bài toán triển khai cụ thể.
+
+Ví dụ:
+
+```text
+site_projects/demo_site/
+  site_project.json
+  captures/
+  reference_gallery/
+  quality/
+  annotations/yolo/
+  models/
+  runs/
+  exports/
+```
+
+Trong `site_project.json` có:
+
+- danh sách class detector,
+- label nào cần chạy identity,
+- label nào cần chạy quality.
+
+Ví dụ:
+
+```json
+{
+  "detector_class_names": ["pill", "bottle", "blister", "thermometer", "syringe"],
+  "identity_detection_labels": ["pill"],
+  "quality_detection_labels": ["pill"]
+}
+```
+
+## 10. Chuẩn Bị Cho Edge AI
+
+Khi local runtime đã ổn, từng module có thể được tối ưu/export:
+
+- Detector YOLO -> ONNX/TensorRT/OpenVINO.
+- Identifier -> embedding model + gallery index.
+- Quality -> rule engine hoặc classifier/anomaly model.
+- Site project -> gói tác vụ cụ thể.
+- Reporter -> giữ nguyên contract để tích hợp hệ thống.
+
+Điều quan trọng: trước khi Edge deployment, chương trình local phải chạy đúng,
+report đúng, metric rõ ràng, failure case được kiểm soát.

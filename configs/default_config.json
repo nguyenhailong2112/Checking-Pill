@@ -1,6 +1,6 @@
 {
   "detector": {
-    "backend": "heuristic",
+    "backend": "auto",
     "confidence_threshold": 0.25,
     "nms_iou_threshold": 0.45,
     "heuristic": {
@@ -25,11 +25,13 @@
     "reference_root": null,
     "reference_manifest": null,
     "reference_image_root": null,
+    "apply_to_detection_labels": ["pill"],
     "reference_only": true,
     "unknown_threshold": 0.82,
     "top_k": 5
   },
   "quality": {
+    "apply_to_detection_labels": ["pill"],
     "min_foreground_ratio": 0.08,
     "max_foreground_ratio": 0.92,
     "min_mask_solidity": 0.72,

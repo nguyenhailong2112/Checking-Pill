@@ -45,8 +45,10 @@ class UltralyticsYOLODetector:
             xyxy = result.boxes.xyxy.cpu().numpy()
             conf = result.boxes.conf.cpu().numpy()
             cls = result.boxes.cls.cpu().numpy()
+            names = getattr(result, "names", None) or getattr(self.model, "names", {})
             for box, score, class_id in zip(xyxy, conf, cls):
-                label = "pill" if int(class_id) == 0 else str(int(class_id))
+                class_index = int(class_id)
+                label = names.get(class_index, str(class_index)) if isinstance(names, dict) else str(class_index)
                 detections.append(
                     Detection(
                         bbox=BBox(float(box[0]), float(box[1]), float(box[2]), float(box[3])),
@@ -57,4 +59,3 @@ class UltralyticsYOLODetector:
                 )
 
         return detections
-

@@ -23,7 +23,7 @@ class YoloDetectorConfig:
 
 @dataclass
 class DetectorConfig:
-    backend: str = "heuristic"
+    backend: str = "auto"
     confidence_threshold: float = 0.25
     nms_iou_threshold: float = 0.45
     heuristic: HeuristicDetectorConfig = field(default_factory=HeuristicDetectorConfig)
@@ -43,6 +43,7 @@ class IdentifierConfig:
     reference_root: str | None = None
     reference_manifest: str | None = None
     reference_image_root: str | None = None
+    apply_to_detection_labels: list[str] = field(default_factory=lambda: ["pill"])
     reference_only: bool = True
     unknown_threshold: float = 0.82
     top_k: int = 5
@@ -50,6 +51,7 @@ class IdentifierConfig:
 
 @dataclass
 class QualityConfig:
+    apply_to_detection_labels: list[str] = field(default_factory=lambda: ["pill"])
     min_foreground_ratio: float = 0.08
     max_foreground_ratio: float = 0.92
     min_mask_solidity: float = 0.72
@@ -91,7 +93,7 @@ def load_config(path: str | Path | None = None) -> EdgeVisionConfig:
     quality_raw = _get_nested(raw, "quality", {})
 
     detector = DetectorConfig(
-        backend=detector_raw.get("backend", "heuristic"),
+        backend=detector_raw.get("backend", "auto"),
         confidence_threshold=detector_raw.get("confidence_threshold", 0.25),
         nms_iou_threshold=detector_raw.get("nms_iou_threshold", 0.45),
         heuristic=HeuristicDetectorConfig(**heuristic_raw),

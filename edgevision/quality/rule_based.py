@@ -88,6 +88,6 @@ class RuleBasedQualityInspector:
         values = gray[mask]
         if len(values) < 16:
             return 0.0
-        threshold = max(0.0, float(np.percentile(values, 20) - 25.0))
+        surface_level = float(np.median(values))
+        threshold = max(0.0, surface_level - 45.0)
         return float((values < threshold).mean())
-

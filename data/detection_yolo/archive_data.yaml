@@ -1,6 +1,0 @@
-path: C:/Users/longn/PyCharmMiscProject/ePillID-benchmark-ePillID_data_v1.0/archive
-train: images/train
-val: images/val
-test:
-names:
-  0: pill

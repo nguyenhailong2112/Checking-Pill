@@ -14,8 +14,15 @@ build/
 runs/
 outputs/
 artifacts/
-models/
-reference_gallery/
+data/manifests/*.csv
+data/manifests/*.json
+data/detection_yolo/*.yaml
+models/**/*.pt
+models/**/*.pth
+models/**/*.onnx
+models/**/*.engine
+reference_gallery/*
+!reference_gallery/README.md
 
 .DS_Store
 Thumbs.db

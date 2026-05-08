@@ -1,173 +1,302 @@
-# Dataset Strategy
+# Chiến Lược Dữ Liệu
 
-EdgeVision should use all available data, but not as one mixed dataset. The data
-must be separated by task because each model needs a different label contract.
+Tài liệu này trả lời câu hỏi quan trọng:
 
-## Source Data Policy
+```text
+Dữ liệu nào dùng để train model nào?
+```
 
-The benchmark/source folder is treated as immutable:
+Không được trộn tất cả ảnh thành một dataset duy nhất. Detection, identity và
+OK/NG là ba bài toán khác nhau, cần label khác nhau và metric khác nhau.
+
+## 1. Nguyên Tắc Dữ Liệu
+
+Thư mục source ePillID được xem là dữ liệu gốc, không chỉnh sửa trực tiếp:
 
 ```text
 C:/Users/longn/PyCharmMiscProject/ePillID-benchmark-ePillID_data_v1.0
 ```
 
-Do not edit, rename, or relabel files in that folder directly. EdgeVision should
-read from it and create derived manifests/configs under:
+Nếu cần tạo bản train sạch hơn, tạo bản copy/dẫn xuất dưới repo EdgeVision:
 
 ```text
 EdgeVision/data/
-EdgeVision/artifacts/
+EdgeVision/models/
 EdgeVision/runs/
+EdgeVision/site_projects/
 ```
 
-These folders can be regenerated.
+Không rename, sửa label, xóa file trực tiếp trong source gốc.
 
-## Recommended Dataset Layout
+## 2. Bảng Dữ Liệu -> Model
+
+| Mục tiêu | Dữ liệu cần | Label cần có | Script train | Artifact |
+| --- | --- | --- | --- | --- |
+| Detect/count pill | ePillID `archive/` | YOLO bbox class `pill` | `colab_train_yolo_detector.py` | `best.pt` |
+| Detect object mới | YOLO site annotations | bbox cho từng class user label | `colab_train_yolo_detector.py` | `best.pt` |
+| Nhận diện loại thuốc | ePillID crop hoặc reference gallery | label loại thuốc | gallery hoặc `colab_train_identity_embedding.py` | gallery / `identity_embedding.pt` |
+| OK/NG | crop lỗi thật | OK/NG hoặc defect subtype | `colab_train_quality_classifier.py` | `quality_classifier.pt` |
+
+## 3. Source ePillID Hiện Có
+
+Audit local source:
 
 ```text
-EdgeVision/
-  data/
-    manifests/
-      source_inventory.json
-      archive_yolo_audit.json
-      epillid_identity_manifest.csv
-      mediseg_unlabeled_manifest.csv
+YOLO archive:
+  train images: 10,559
+  val images: 1,508
+  labels: 12,067
+  boxes: 144,111
+  empty label files: 456
 
-    detection_yolo/
-      data.yaml
-      README.md
+Identity ePillID:
+  rows: 13,532
+  labels: 4,902
+  reference rows: 9,804
+  consumer rows: 3,728
 
-    identity/
-      epillid_all.csv
-      epillid_reference_gallery.csv
-
-    quality/
-      README.md
-      train/
-        OK/
-        NG_broken/
-        NG_chipped/
-        NG_color_abnormal/
-        NG_stain/
-      val/
-      test/
+MEDISEG:
+  images: 10,594
 ```
 
-The first stage does not need to copy images. The generated manifests can point
-to the original absolute source paths.
+Ý nghĩa:
 
-## Task-Specific Datasets
+- `archive/` dùng tốt cho detector/counting.
+- `ePillID_data/all_labels.csv` dùng cho identity/reference/embedding.
+- `MEDISEG` hiện nên xem là domain data, chưa dùng supervised nếu chưa có label
+  phù hợp.
 
-### 1. Detection / Counting
+## 4. Dataset Cho Detector
 
-Source:
+Detector cần dữ liệu YOLO:
 
 ```text
-source/archive/images/train
-source/archive/images/val
-source/archive/labels/train
-source/archive/labels/val
+dataset/
+  images/
+    train/
+    val/
+  labels/
+    train/
+    val/
+  data.yaml
 ```
 
-Label format:
+Mỗi file label `.txt`:
 
 ```text
 class_id x_center y_center width height
 ```
 
-All values after `class_id` are normalized to `[0, 1]`. Class `0` means `pill`.
-Empty label files are valid negative images.
+Tất cả tọa độ normalize về `[0, 1]`.
 
-Current audit result on the local source archive:
+### Pill-only detector
 
-```text
-images: 12,067
-labels: 12,067
-missing labels: 0
-labels without images: 0
-boxes: 144,111 total raw boxes
-invalid/out-of-bound lines found by strict audit: 29
-```
-
-Those 29 boxes exceed the normalized image boundary slightly. The source data
-should remain unchanged; use `tools/export_yolo_dataset.py` to create a
-sanitized training copy that clips those boxes into valid YOLO coordinates.
-
-Model:
+Class:
 
 ```text
-YOLO one-class pill detector
+0: pill
 ```
 
-Outputs:
+Train ra:
 
 ```text
 models/pill_detector_yolo/best.pt
-models/pill_detector_yolo/last.pt
 ```
 
-### 2. Identity / Recognition
+### Multi-object site detector
 
-Source:
+Ví dụ class:
 
 ```text
-source/ePillID_data/ePillID_data/all_labels.csv
-source/ePillID_data/ePillID_data/classification_data
+0: pill
+1: bottle
+2: blister
+3: thermometer
+4: syringe
 ```
 
-Main columns:
+Train ra:
 
 ```text
-label, pilltype_id, image_path, is_ref, is_front, is_new
+site_projects/demo_site/models/best.pt
 ```
 
-Stage-1 use:
+Nếu user muốn object mới, ví dụ `cotton_swab`, thêm class mới vào dataset YOLO và
+train lại detector site.
+
+## 5. Dataset Cho Identity
+
+Identity không cần ảnh full-scene, mà cần crop hoặc ảnh reference của từng loại
+thuốc.
+
+Gallery đơn giản:
 
 ```text
-reference-gallery retrieval
+reference_gallery/
+  RoundWhiteTablet/
+    ref_001.jpg
+    ref_002.jpg
+  RedWhiteCapsule/
+    ref_001.jpg
 ```
 
-The current EdgeVision identifier can read `all_labels.csv` directly with:
+Site project gallery:
 
 ```text
---reference-manifest <all_labels.csv>
---reference-image-root <classification_data>
+site_projects/demo_site/reference_gallery/
+  RoundWhiteTablet/
+    ref_001.jpg
 ```
 
-Future model:
+ePillID external gallery:
 
 ```text
-embedding network trained with metric learning
+all_labels.csv
+classification_data/
 ```
 
-### 3. Quality OK/NG
+Lệnh runtime:
 
-Current source data does not contain explicit OK/NG defect labels. Do not train a
-supervised quality classifier until labels exist.
+```powershell
+python -m edgevision.cli batch `
+  --input data\real_test_images `
+  --output runs\epillid_gallery_test `
+  --config configs\runtime_yolo_config.json `
+  --reference-manifest C:\Users\longn\PyCharmMiscProject\ePillID-benchmark-ePillID_data_v1.0\ePillID_data\ePillID_data\all_labels.csv `
+  --reference-image-root C:\Users\longn\PyCharmMiscProject\ePillID-benchmark-ePillID_data_v1.0\ePillID_data\ePillID_data\classification_data
+```
 
-Initial stage:
+## 6. Dataset Cho OK/NG
+
+OK/NG cần dữ liệu lỗi thật. Nếu chưa có ảnh lỗi thật thì không nên claim model
+OK/NG supervised.
+
+Cấu trúc đề xuất:
 
 ```text
-rule-based + anomaly baseline
+data/quality/
+  train/
+    OK/
+    NG_broken/
+    NG_chipped/
+    NG_stain/
+    NG_color_abnormal/
+  val/
+    OK/
+    NG_broken/
+    NG_chipped/
+    NG_stain/
+    NG_color_abnormal/
 ```
 
-Future supervised dataset:
+Nguồn crop có thể lấy từ runtime:
 
 ```text
-quality/train/OK
-quality/train/NG_broken
-quality/train/NG_chipped
-quality/train/NG_color_abnormal
-quality/train/NG_stain
+runs/<run_name>/<image_id>/crops/
 ```
 
-## What "Use 100% Data" Means
+Quy trình:
 
-Using all data does not mean mixing all images into one training set. It means:
+1. Chạy inference trên ảnh thật.
+2. Mở crop từng object.
+3. Người dùng hoặc engineer gán nhãn OK/NG.
+4. Copy crop vào folder tương ứng.
+5. Chỉ train quality classifier khi label đã đủ tin cậy.
 
-- all YOLO-labeled images are used for detector training/evaluation,
-- all ePillID crop images are used for identity gallery/training,
-- all MEDISEG images are preserved as unlabeled/domain data until labeling or
-  pseudo-labeling is intentionally added,
-- negative images remain negative detection samples,
-- train/val/test boundaries are never mixed.
+## 7. Site Project Data
+
+Mỗi site nên có project riêng:
+
+```text
+site_projects/demo_site/
+  captures/                  ảnh/site frame gốc
+  reference_gallery/          ảnh reference loại thuốc
+  quality/                    ảnh OK/NG theo site
+  annotations/yolo/           dữ liệu YOLO cho detector site
+  models/                     weights của site
+  runs/                       output test site
+```
+
+Tạo bằng:
+
+```powershell
+python -m edgevision.cli project-init `
+  --path site_projects\demo_site `
+  --name demo_site `
+  --classes pill bottle blister thermometer syringe `
+  --identity-labels pill `
+  --quality-labels pill
+```
+
+## 8. Khi Nào Cần Train Lại?
+
+### Không cần train lại detector nếu:
+
+- detector đã tìm được viên thuốc tốt,
+- bạn chỉ thêm loại thuốc mới,
+- bạn chỉ thêm reference ảnh cho loại thuốc.
+
+Khi đó chỉ cần:
+
+```powershell
+python -m edgevision.cli project-add-reference ...
+```
+
+### Cần train lại detector nếu:
+
+- có object class mới cần detect,
+- detector bỏ sót object,
+- detector nhận nhầm nhiều,
+- setup camera/nền/ánh sáng khác nhiều so với data train.
+
+### Cần train quality model nếu:
+
+- rule-based không đủ,
+- có nhiều defect type,
+- đã có crop OK/NG thật và label đáng tin cậy.
+
+## 9. Nguyên Tắc Train/Val/Test
+
+Không được để ảnh gần giống nhau rơi lung tung vào train và val nếu điều đó làm
+metric ảo.
+
+Khuyến nghị:
+
+- train: ảnh dùng để học,
+- val: ảnh dùng chọn model/threshold,
+- test: ảnh giữ lại đến cuối mới đánh giá.
+
+Với site thực tế, nên giữ một tập test riêng gồm ảnh khó:
+
+- object chạm nhau,
+- ánh sáng khác,
+- nền khác,
+- ảnh blur nhẹ,
+- object gần biên ảnh,
+- case OK/NG khó.
+
+## 10. Checklist Trước Khi Train
+
+Trước khi train detector:
+
+- `images/train` có ảnh,
+- `images/val` có ảnh,
+- `labels/train` có `.txt`,
+- `labels/val` có `.txt`,
+- class id trong label khớp `data.yaml`,
+- bbox normalize đúng,
+- không thiếu label file ngoài ý muốn.
+
+Trước khi train identity:
+
+- ảnh crop/reference rõ,
+- label loại thuốc đúng,
+- mỗi loại có đủ ảnh nếu có thể,
+- không trộn nhầm hai loại giống nhau.
+
+Trước khi train quality:
+
+- định nghĩa OK/NG rõ,
+- defect type rõ,
+- label đã được review,
+- không đưa ảnh mơ hồ vào OK/NG cứng.

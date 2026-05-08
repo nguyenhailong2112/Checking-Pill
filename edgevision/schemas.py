@@ -128,7 +128,9 @@ class PillItem:
         return {
             "id": self.item_id,
             "bbox": self.detection.bbox.to_int_list(),
+            "det_label": self.detection.label,
             "det_conf": round(float(self.detection.confidence), 6),
+            "det_source": self.detection.source,
             "type": self.identity.label,
             "type_conf": round(float(self.identity.confidence), 6),
             "quality": self.quality.status.value,
@@ -149,7 +151,9 @@ class InspectionReport:
     count_by_type: dict[str, int]
     items: list[PillItem]
     image_status: QualityStatus
+    count_by_detection_label: dict[str, int] = field(default_factory=dict)
     precheck: dict[str, Any] = field(default_factory=dict)
+    runtime: dict[str, float] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -157,9 +161,12 @@ class InspectionReport:
             "image_width": self.image_width,
             "image_height": self.image_height,
             "total_count": self.total_count,
+            "count_by_detection_label": self.count_by_detection_label,
             "count_by_type": self.count_by_type,
             "image_status": self.image_status.value,
             "precheck": self.precheck,
+            "runtime": {
+                key: round(float(value), 6) for key, value in self.runtime.items()
+            },
             "items": [item.to_dict() for item in self.items],
         }
-

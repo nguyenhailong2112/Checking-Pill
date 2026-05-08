@@ -17,6 +17,11 @@ dependencies = [
 yolo = [
   "ultralytics>=8.3"
 ]
+training = [
+  "ultralytics>=8.3",
+  "torch>=2.2",
+  "torchvision>=0.17"
+]
 dev = [
   "pytest>=8.0",
   "ruff>=0.6"
@@ -32,4 +37,3 @@ include = ["edgevision*"]
 [tool.ruff]
 line-length = 100
 target-version = "py310"
-
